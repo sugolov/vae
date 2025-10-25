@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import equinox as eqx
 from equinox import nn
 
-from model.components import FeedForward, ConvPoolBlock  # <- adjust import
+from model.components import FeedForward, ConvBlock  # <- adjust import
 
 def test_feedforward_forward():
     key = jax.random.PRNGKey(0)
@@ -35,7 +35,7 @@ def test_convpoolblock_forward():
     subkeys = jax.random.split(key, B)
 
 
-    block, state = nn.make_with_state(ConvPoolBlock)(C_in, C_out, kernel_size=k, padding=pad, key=key)
+    block, state = nn.make_with_state(ConvBlock)(C_in, C_out, kernel_size=k, padding=pad, key=key)
     print(block)
     y, state_out = jax.vmap(
         block, 
