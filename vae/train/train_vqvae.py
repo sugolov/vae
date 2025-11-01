@@ -9,7 +9,7 @@ import argparse
 import os
 import functools
 from pathlib import Path
-from vaeqx.vqvae import VQVAE, train_step
+from src.model.vqvae import VQVAE, train_step
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
