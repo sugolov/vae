@@ -9,11 +9,12 @@ import argparse
 import os
 import functools
 from pathlib import Path
-from src.model.vqvae import VQVAE, train_step
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
-from fid import compute_frechet_distance, compute_statistics
+from vae.model.vqvae import VQVAE, train_step
+from vae.train.fid import compute_frechet_distance, compute_statistics
+
 from flax_inception import InceptionV3
 
 
