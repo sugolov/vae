@@ -2,3 +2,7 @@
 *.egg-info
 vae/*/__pycache__
 */__pycache__
+slurm
+vae/train/data/*
+vae/train/checkpoints/*
+

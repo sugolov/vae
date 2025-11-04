@@ -3,7 +3,7 @@ name = "vae"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "equinox>=0.13.1",
     "fid>=0.2.1",
