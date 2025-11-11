@@ -4,6 +4,7 @@ vae/*/__pycache__
 */__pycache__
 slurm
 vae/train/data/*
+vae/test/data/*
 vae/train/checkpoints/*
 
 *_log.txt
