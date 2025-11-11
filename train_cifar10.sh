@@ -7,8 +7,8 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --time=10:00:00
 #SBATCH --mem=24G
-#SBATCH --gres=gpu:a100:1
-#SBATCH --nodelist=lambda-hyperplane
+#SBATCH --gres=gpu:5090:1
+#SBATCH --nodelist=tinybox
 
 export EXPERIMENT_TAG=vqvae_cifar10_${SLURM_JOB_ID}
 
@@ -59,7 +59,6 @@ python train_vqvae.py \
     --embedding_dim 256 \
     --beta_commit 1.0 \
     --seed 42
-    # --resume "./checkpoints/vqvae_cifar10_epoch_100"
-
+    --resume "/mnt/data0/shared/anton/cache/vqvae_checkpoints/vqvae_cifar10_205880_epoch_900_model.eqx"
 
 deactivate

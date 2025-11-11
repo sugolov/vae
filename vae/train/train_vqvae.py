@@ -15,87 +15,11 @@ import requests
 import tarfile
 from typing import Tuple
 
+from vae.data import load_dataset
 from vae.model.vqvae import VQVAE, train_step
 from vae.train.fid import compute_frechet_distance, compute_statistics
 
 from flax_inception import InceptionV3
-
-
-def download_cifar10(data_dir: str = "./data/cifar10") -> Tuple[np.ndarray, np.ndarray]:
-    """Download and load CIFAR-10 dataset without TensorFlow"""
-    Path(data_dir).mkdir(parents=True, exist_ok=True)
-    
-    cifar10_url = "https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
-    tar_path = os.path.join(data_dir, "cifar-10-python.tar.gz")
-    
-    # Download if not exists
-    if not os.path.exists(tar_path):
-        print(f"Downloading CIFAR-10 from {cifar10_url}...")
-        try:
-            response = requests.get(cifar10_url, stream=True, timeout=30)
-            response.raise_for_status()
-            total_size = int(response.headers.get('content-length', 0))
-            
-            with open(tar_path, 'wb') as f:
-                with tqdm(total=total_size, unit='B', unit_scale=True, desc="Downloading") as pbar:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-                            pbar.update(len(chunk))
-            print("Download complete!")
-        except requests.exceptions.RequestException as e:
-            print(f"Error downloading CIFAR-10: {e}")
-            if os.path.exists(tar_path):
-                os.remove(tar_path)
-            raise
-    
-    # Extract if not exists
-    extract_dir = os.path.join(data_dir, "cifar-10-batches-py")
-    if not os.path.exists(extract_dir):
-        print("Extracting CIFAR-10...")
-        try:
-            with tarfile.open(tar_path, 'r:gz') as tar:
-                tar.extractall(data_dir)
-            print("Extraction complete!")
-        except (tarfile.TarError, IOError) as e:
-            print(f"Error extracting CIFAR-10: {e}")
-            print("Tar file may be corrupted. Deleting and re-downloading...")
-            if os.path.exists(tar_path):
-                os.remove(tar_path)
-            if os.path.exists(extract_dir):
-                shutil.rmtree(extract_dir)
-            raise
-    
-    # Load data batches
-    print("Loading CIFAR-10 batches...")
-    train_images = []
-    train_labels = []
-    
-    for i in range(1, 6):  # 5 training batches
-        batch_file = os.path.join(extract_dir, f"data_batch_{i}")
-        if not os.path.exists(batch_file):
-            raise FileNotFoundError(f"Batch file not found: {batch_file}")
-            
-        with open(batch_file, 'rb') as f:
-            batch = pickle.load(f, encoding='bytes')
-            # CIFAR-10 images are stored as (N, 3072) with RGB channels
-            # Reshape to (N, 32, 32, 3)
-            images = batch[b'data'].reshape(-1, 3, 32, 32)
-            # Transpose to (N, 32, 32, 3)
-            images = images.transpose(0, 2, 3, 1)
-            train_images.append(images)
-            train_labels.append(batch[b'labels'])
-        print(f"  Loaded batch {i}/5")
-    
-    train_images = np.concatenate(train_images, axis=0)
-    train_labels = np.concatenate(train_labels, axis=0)
-    
-    # Normalize to [0, 1]
-    train_images = train_images.astype(np.float32) / 255.0
-    
-    print(f"Successfully loaded {len(train_images)} training images")
-    return train_images, train_labels
-
 
 def load_cifar10(data_dir="./data/cifar10"):
     """Load CIFAR-10 dataset without TensorFlow"""
