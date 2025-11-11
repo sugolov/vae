@@ -117,7 +117,6 @@ class Encoder(eqx.Module):
         for block in self.down_blocks:
             for layer in block:
                 x = layer(x)
-                print(x.shape)
 
         x = self.mid_block1(x)
         x = self.mid_block2(x)
@@ -192,7 +191,6 @@ class Decoder(eqx.Module):
         for block in self.up_blocks:
             for layer in block:
                 x = layer(x)
-                print(layer, x.shape)
 
         x = self.norm_out(x)
         x = jax.nn.swish(x)

@@ -15,53 +15,11 @@ import requests
 import tarfile
 from typing import Tuple
 
-from vae.data import load_dataset
+from vae.data import build_dataset
 from vae.model.vqvae import VQVAE, train_step
 from vae.train.fid import compute_frechet_distance, compute_statistics
 
 from flax_inception import InceptionV3
-
-def load_cifar10(data_dir="./data/cifar10"):
-    """Load CIFAR-10 dataset without TensorFlow"""
-    cache_path = os.path.join(data_dir, "cifar10_cache.npz")
-    
-    # Try to load from cache first
-    if os.path.exists(cache_path):
-        try:
-            print(f"Loading CIFAR-10 from cache: {cache_path}")
-            with np.load(cache_path) as data:
-                images = data['images']
-                labels = data['labels']
-                print(f"Successfully loaded {len(images)} images from cache")
-                return images, labels
-        except Exception as e:
-            print(f"Cache file corrupted or invalid: {e}")
-            print(f"Deleting corrupted cache file: {cache_path}")
-            os.remove(cache_path)
-            print("Will re-download CIFAR-10...")
-    
-    # Download and process
-    try:
-        train_images, train_labels = download_cifar10(data_dir)
-        
-        # Cache for faster loading next time
-        print(f"Caching CIFAR-10 to: {cache_path}")
-        np.savez_compressed(cache_path, images=train_images, labels=train_labels)
-        print(f"Successfully cached {len(train_images)} images")
-        
-        return train_images, train_labels
-    
-    except Exception as e:
-        print(f"Error downloading/processing CIFAR-10: {e}")
-        print("Generating synthetic data for testing...")
-        # Fallback: generate synthetic data for testing
-        train_images = np.random.rand(50000, 32, 32, 3).astype(np.float32)
-        train_labels = np.random.randint(0, 10, 50000)
-        return train_images, train_labels
-
-
-
-
 
 @eqx.filter_jit
 def batch_reconstruct(vqvae, imgs_batch):
@@ -191,29 +149,34 @@ def load_checkpoint(path, seed):
 
     return model, opt_state, checkpoint['epoch'], args
 
-
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--exp_name", type=str, default="vqvae_cifar10")
     p.add_argument("--epochs", type=int, default=1000)
     p.add_argument("--batch_size", type=int, default=256)
     p.add_argument("--lr", type=float, default=1e-3)
+
     p.add_argument("--log_interval", type=int, default=5)
     p.add_argument("--save_interval", type=int, default=10)
     p.add_argument("--vis_interval", type=int, default=10)
+
     p.add_argument("--n_fid_samples", type=int, default=10_000)
+    p.add_argument("--no_fid", action="store_true", help="Skip FID computation for testing")
+
     p.add_argument("--save_dir", type=str, default="./checkpoints")
-    p.add_argument("--data_dir", type=str, default="./data/cifar10")
+    p.add_argument("--data_name", type=str, default="CIFAR10")
+    p.add_argument("--data_dir", type=str, default="./data/")
+    p.add_argument("--resume", type=str, default=None)
+
     p.add_argument("--ch", type=int, default=128)
     p.add_argument("--ch_mult", type=str, default="1,2,4")
     p.add_argument("--num_res_blocks", type=int, default=2)
     p.add_argument("--num_embeddings", type=int, default=1024)
     p.add_argument("--embedding_dim", type=int, default=256)
     p.add_argument("--beta_commit", type=float, default=1.0)
-    p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--resume", type=str, default=None)
-    return p.parse_args()
 
+    p.add_argument("--seed", type=int, default=42)
+    return p.parse_args()
 
 def train_cifar10(args):
     Path(args.save_dir).mkdir(parents=True, exist_ok=True)
@@ -223,12 +186,26 @@ def train_cifar10(args):
     print(f"JAX backend: {jax.devices()[0].platform}")
     print(f"JAX devices: {jax.devices()}")
 
+    # create dataset
     print("Loading CIFAR-10 dataset...")
-    train_images, train_labels = load_cifar10(args.data_dir)
-    n_train = len(train_images)
+    dataloader, num_classes, n_train, image_size = build_dataset(
+        args.data_name,
+        args.data_dir,
+        batch_size=args.batch_size,
+        is_train=True,
+        num_workers=4,
+    )
+
     n_batches = n_train // args.batch_size
     print(f"Loaded {n_train} training images")
-
+    
+    # Store first batch for visualization/testing - convert to HWC
+    first_batch_imgs, _ = next(iter(dataloader))
+    test_batch = first_batch_imgs[:100]  # Keep 100 images for visualization
+    # test_batch = np.transpose(test_batch, (0, 2, 3, 1))  # BCHW -> BHWC
+    print(f"Test batch shape: {test_batch.shape}")
+    
+    # resume from checkpoint
     if args.resume:
         vqvae, opt_state, start_epoch, args = load_checkpoint(args.resume, args.seed)
         print(f"Resumed from epoch {start_epoch}")
@@ -258,36 +235,53 @@ def train_cifar10(args):
     n_params = sum(x.size for x in jax.tree.leaves(vqvae))
     print(f"Model parameters: {n_params:,}")
 
-    # Check latent shape
-    test_img = train_images[0]
+    # Check latent shape - encoder expects single image without batch dim in HWC
+    test_img = test_batch[0]  # Shape: (32, 32, 3)
+    print(f"Test image shape: {test_img.shape}")
     test_latent = vqvae.encoder(test_img)
-    print(f"Latent shape for 32x32 input: {test_latent.shape} (expecting 8x8x{args.embedding_dim} with --ch_mult 1,2,4)")
+    print(f"Latent shape for {image_size}x{image_size} input: {test_latent.shape} (expecting 8x8x{args.embedding_dim} with --ch_mult 1,2,4)")
 
-    # Initialize InceptionV3 for FID computation
-    print("Initializing InceptionV3 for FID...")
-    rng = jax.random.key(0)
-    inception = InceptionV3(pretrained=True)
-    inception_params = inception.init(rng, jnp.ones((1, 32, 32, 3)))
-    apply_fn = jax.jit(functools.partial(inception.apply, train=False))
+    # Initialize InceptionV3 for FID computation (only if needed)
+    if not args.no_fid:
+        print("Initializing InceptionV3 for FID...")
+        rng = jax.random.key(0)
+        inception = InceptionV3(pretrained=True)
+        inception_params = inception.init(rng, jnp.ones((1, 32, 32, 3)))
+        apply_fn = jax.jit(functools.partial(inception.apply, train=False))
 
-    # Precompute or load real CIFAR-10 statistics
-    stats_path = Path(args.save_dir) / "fid_stats_cifar10.npz"
-    if stats_path.exists():
-        with np.load(stats_path) as f:
-            mu_real, sigma_real = f["mu"], f["sigma"]
-        print(f"Loaded FID stats from {stats_path}")
+        # Precompute or load real CIFAR-10 statistics
+        stats_path = Path(args.save_dir) / "fid_stats_cifar10.npz"
+        if stats_path.exists():
+            with np.load(stats_path) as f:
+                mu_real, sigma_real = f["mu"], f["sigma"]
+            print(f"Loaded FID stats from {stats_path}")
+        else:
+            print("Computing FID statistics for real CIFAR-10 data...")
+            # Collect a subset of real images for FID stats
+            real_images_list = []
+            for imgs_batch, _ in dataloader:
+                # Convert BCHW to BHWC
+                # imgs_batch = np.transpose(imgs_batch, (0, 2, 3, 1))
+                real_images_list.append(imgs_batch)
+                if len(real_images_list) * args.batch_size >= 10000:  # Use 10k images for stats
+                    break
+            real_images = np.concatenate(real_images_list, axis=0)[:10000]
+            real_images_uint8 = (real_images * 255).astype(np.uint8)
+            mu_real, sigma_real = compute_statistics(
+                real_images_uint8, inception_params, apply_fn, batch_size=256, img_size=(256, 256)
+            )
+            np.savez(stats_path, mu=mu_real, sigma=sigma_real)
+            print(f"Saved FID stats to {stats_path}")
     else:
-        print("Computing FID statistics for real CIFAR-10 data...")
-        real_images_uint8 = (train_images * 255).astype(np.uint8)
-        mu_real, sigma_real = compute_statistics(
-            real_images_uint8, inception_params, apply_fn, batch_size=256, img_size=(256, 256)
-        )
-        np.savez(stats_path, mu=mu_real, sigma=sigma_real)
-        print(f"Saved FID stats to {stats_path}")
+        print("Skipping FID initialization (--no_fid flag set)")
+        mu_real = sigma_real = inception_params = apply_fn = None
 
     logf = open(f"{args.exp_name}_log.txt", "a" if args.resume else "w")
     if not args.resume:
-        logf.write("Epoch,Train_Loss,Recon_Loss,Commit_Loss,FID\n")
+        if args.no_fid:
+            logf.write("Epoch,Train_Loss,Recon_Loss,Commit_Loss\n")
+        else:
+            logf.write("Epoch,Train_Loss,Recon_Loss,Commit_Loss,FID\n")
 
     @eqx.filter_jit
     def jit_train_step(model, batch, opt_state, key):
@@ -295,40 +289,53 @@ def train_cifar10(args):
 
     if start_epoch == 0:
         vis_path = os.path.join(args.save_dir, f"{args.exp_name}_reconstructions")
-        save_reconstruction_grid(vqvae, train_images, 0, vis_path, n_images=25)
+        save_reconstruction_grid(vqvae, test_batch, 0, vis_path, n_images=25)
         print(f"Saved initial reconstruction grid to {vis_path}_epoch_0.png")
 
-        print("Computing initial FID score...")
-        fid_score = compute_fid_score(vqvae, train_images, mu_real, sigma_real, inception_params, apply_fn, args.n_fid_samples, args.batch_size)
-        logf.write(f"0,0.0000,0.0000,0.0000,{fid_score:.2f}\n")
-        logf.flush()
-        print(f"Epoch 0 (untrained): FID={fid_score:.2f}")
+        if not args.no_fid:
+            print("Computing initial FID score...")
+            # For FID, collect sample images
+            sample_images = []
+            for imgs_batch, _ in dataloader:
+                # Convert BCHW to BHWC
+                # imgs_batch = np.transpose(imgs_batch, (0, 2, 3, 1))
+                sample_images.append(imgs_batch)
+                if len(sample_images) * args.batch_size >= args.n_fid_samples:
+                    break
+            sample_images = np.concatenate(sample_images, axis=0)[:args.n_fid_samples]
+            
+            fid_score = compute_fid_score(vqvae, sample_images, mu_real, sigma_real, inception_params, apply_fn, args.n_fid_samples, args.batch_size)
+            logf.write(f"0,0.0000,0.0000,0.0000,{fid_score:.2f}\n")
+            logf.flush()
+            print(f"Epoch 0 (untrained): FID={fid_score:.2f}")
+        else:
+            logf.write(f"0,0.0000,0.0000,0.0000\n")
+            logf.flush()
+            print(f"Epoch 0 (untrained): FID=skipped")
 
     # Rolling buffer of recent latents for refresh
     buffer_max = 8192
     z_buffer = np.empty((0, args.embedding_dim), dtype=np.float32)
 
+    # train loop
     for epoch in range(start_epoch, args.epochs):
         epoch_losses = {"total": 0, "recon": 0, "commit": 0}
 
-        # Shuffle training data
-        indices = np.random.permutation(n_train)
-
-        pbar = tqdm(range(n_batches), desc=f"Epoch {epoch+1}/{args.epochs}")
+        pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{args.epochs}")
         
-        for batch_idx in pbar:
-            batch_indices = indices[batch_idx * args.batch_size : (batch_idx + 1) * args.batch_size]
-            imgs_batch = train_images[batch_indices]
+        for imgs_batch, labels_batch in pbar:
+            # Convert BCHW to BHWC for JAX model
+            # imgs_batch = np.transpose(imgs_batch, (0, 2, 3, 1))
             imgs_jax = jnp.array(imgs_batch)
 
             key, subkey = jax.random.split(key)
             vqvae, opt_state, loss, outputs = jit_train_step(vqvae, imgs_jax, opt_state, subkey)
 
-            batch_size = imgs_jax.shape[0]
+            batch_size_actual = imgs_jax.shape[0]
             recon_losses = outputs["recon_loss"]
             commit_losses = outputs["commit_loss"]
 
-            epoch_losses["total"] += float(loss) * batch_size
+            epoch_losses["total"] += float(loss) * batch_size_actual
             epoch_losses["recon"] += float(jnp.sum(recon_losses))
             epoch_losses["commit"] += float(jnp.sum(commit_losses))
 
@@ -349,35 +356,41 @@ def train_cifar10(args):
 
         avg_losses = {k: v / n_train for k, v in epoch_losses.items()}
 
-        # Periodic codebook refresh at epoch boundaries if buffer has enough samples
-        # if z_buffer.shape[0] >= min(buffer_max // 2, 4096):
-        #     zbuf_jax = jnp.array(z_buffer)
-        #     key, rkey = jax.random.split(key)
-        #     new_quant, key = vqvae.quantizer.refresh_codebook(
-        #         zbuf_jax, rkey,
-        #         threshold=1e-4, patience=3, max_frac=0.1, cooldown_steps=100, noise_std=0.01
-        #     )
-        #     vqvae = eqx.tree_at(lambda m: m.quantizer, vqvae, new_quant)
-
-        # Compute FID only at log intervals
-        if (epoch + 1) % args.log_interval == 0:
+        # Compute FID only at log intervals and if not disabled
+        if (epoch + 1) % args.log_interval == 0 and not args.no_fid:
             print(f"\nEpoch {epoch+1}: Computing FID score...")
-            fid_score = compute_fid_score(vqvae, train_images, mu_real, sigma_real, inception_params, apply_fn, args.n_fid_samples, args.batch_size)
+            # Collect sample images for FID
+            sample_images = []
+            for imgs_batch, _ in dataloader:
+                # Convert BCHW to BHWC
+                # imgs_batch = np.transpose(imgs_batch, (0, 2, 3, 1))
+                sample_images.append(imgs_batch)
+                if len(sample_images) * args.batch_size >= args.n_fid_samples:
+                    break
+            sample_images = np.concatenate(sample_images, axis=0)[:args.n_fid_samples]
+            
+            fid_score = compute_fid_score(vqvae, sample_images, mu_real, sigma_real, inception_params, apply_fn, args.n_fid_samples, args.batch_size)
 
             print(f"Epoch {epoch+1}: Loss={avg_losses['total']:.4f}, "
                   f"Recon={avg_losses['recon']:.6f}, Commit={avg_losses['commit']:.8f}, "
                   f"FID={fid_score:.2f}")
         else:
-            fid_score = "N/A"
-            print(f"Epoch {epoch+1}: Loss={avg_losses['total']:.4f}, "
-                  f"Recon={avg_losses['recon']:.6f}, Commit={avg_losses['commit']:.8f}")
+            fid_score = None
+            if args.no_fid:
+                print(f"Epoch {epoch+1}: Loss={avg_losses['total']:.4f}, "
+                      f"Recon={avg_losses['recon']:.6f}, Commit={avg_losses['commit']:.8f}")
+            else:
+                print(f"Epoch {epoch+1}: Loss={avg_losses['total']:.4f}, "
+                      f"Recon={avg_losses['recon']:.6f}, Commit={avg_losses['commit']:.8f}, "
+                      f"FID=pending")
 
         # Write losses every epoch
-        log_str = f"{epoch+1},{avg_losses['total']:.6f},{avg_losses['recon']:.8f},{avg_losses['commit']:.6f},"
-        if isinstance(fid_score, float):
-            log_str += f"{fid_score:.2f}"
-        else:
-            log_str += fid_score
+        log_str = f"{epoch+1},{avg_losses['total']:.6f},{avg_losses['recon']:.8f},{avg_losses['commit']:.6f}"
+        if not args.no_fid:
+            if fid_score is not None and isinstance(fid_score, float):
+                log_str += f",{fid_score:.2f}"
+            else:
+                log_str += ",N/A"
         logf.write(log_str + "\n")
         logf.flush()
 
@@ -388,7 +401,7 @@ def train_cifar10(args):
 
         if (epoch + 1) % args.vis_interval == 0:
             vis_path = os.path.join(args.save_dir, f"{args.exp_name}_reconstructions")
-            save_reconstruction_grid(vqvae, train_images, epoch + 1, vis_path, n_images=25)
+            save_reconstruction_grid(vqvae, test_batch, epoch + 1, vis_path, n_images=25)
             print(f"Saved reconstruction grid to {vis_path}_epoch_{epoch+1}.png")
 
     final_path = os.path.join(args.save_dir, f"{args.exp_name}_final")
@@ -396,11 +409,10 @@ def train_cifar10(args):
     print(f"Training complete! Final model saved to {final_path}")
 
     vis_path = os.path.join(args.save_dir, f"{args.exp_name}_reconstructions")
-    save_reconstruction_grid(vqvae, train_images, args.epochs, vis_path, n_images=25)
+    save_reconstruction_grid(vqvae, test_batch, args.epochs, vis_path, n_images=25)
     print(f"Saved final reconstruction grid to {vis_path}_epoch_{args.epochs}.png")
 
     logf.close()
-
 
 if __name__ == "__main__":
     args = parse_args()

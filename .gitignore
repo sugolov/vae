@@ -6,5 +6,5 @@ slurm
 vae/train/data/*
 vae/train/checkpoints/*
 
-
+*_log.txt
 *.aim
