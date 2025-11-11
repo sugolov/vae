@@ -5,6 +5,7 @@ import optax
 import numpy as np
 from tqdm import tqdm
 import argparse
+import aim
 import os
 import functools
 from pathlib import Path
@@ -19,7 +20,7 @@ from vae.data import build_dataset
 from vae.model.vqvae import VQVAE, train_step
 from vae.train.fid import compute_frechet_distance, compute_statistics
 
-from flax_inception import InceptionV3
+from vae.train.flax_inception import InceptionV3
 
 @eqx.filter_jit
 def batch_reconstruct(vqvae, imgs_batch):
@@ -179,12 +180,12 @@ def parse_args():
     return p.parse_args()
 
 def train_cifar10(args):
+    print(f"JAX backend: {jax.devices()[0].platform}")
+    print(f"JAX devices: {jax.devices()}")
+
     Path(args.save_dir).mkdir(parents=True, exist_ok=True)
     ch_mult = tuple(map(int, args.ch_mult.split(',')))
     key = jax.random.key(args.seed)
-
-    print(f"JAX backend: {jax.devices()[0].platform}")
-    print(f"JAX devices: {jax.devices()}")
 
     # create dataset
     print("Loading CIFAR-10 dataset...")
@@ -317,6 +318,15 @@ def train_cifar10(args):
     buffer_max = 8192
     z_buffer = np.empty((0, args.embedding_dim), dtype=np.float32)
 
+
+    # aim logging
+    run = aim.Run(experiment=args.exp_name)
+    run["hparams"] = vars(args)
+    #metric_loss = Metric(run=run, name="loss", context={"epoch": 0})
+    #metric_recon = Metric(run=run, name="recon", context={"epoch": 0})
+    #metric_commit = Metric(run=run, name="commit", context={"epoch": 0})
+
+
     # train loop
     for epoch in range(start_epoch, args.epochs):
         epoch_losses = {"total": 0, "recon": 0, "commit": 0}
@@ -355,6 +365,8 @@ def train_cifar10(args):
                 z_buffer = z_buffer[-buffer_max:]
 
         avg_losses = {k: v / n_train for k, v in epoch_losses.items()}
+        # track with aim
+        _ = [run.track(v, name=k) for k, v in avg_losses.items()]
 
         # Compute FID only at log intervals and if not disabled
         if (epoch + 1) % args.log_interval == 0 and not args.no_fid:
