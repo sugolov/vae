@@ -153,6 +153,8 @@ def load_checkpoint(path, seed):
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--exp_name", type=str, default="vqvae_cifar10")
+    p.add_argument("--tag", type=str, default=None)
+
     p.add_argument("--epochs", type=int, default=1000)
     p.add_argument("--batch_size", type=int, default=256)
     p.add_argument("--lr", type=float, default=1e-3)
@@ -167,6 +169,8 @@ def parse_args():
     p.add_argument("--save_dir", type=str, default="./checkpoints")
     p.add_argument("--data_name", type=str, default="CIFAR10")
     p.add_argument("--data_dir", type=str, default="./data/")
+    p.add_argument("--aim_repo", type=str, default=None, help="Path to aim repository (defaults to .aim in current dir)")
+    
     p.add_argument("--resume", type=str, default=None)
 
     p.add_argument("--ch", type=int, default=128)
@@ -184,6 +188,7 @@ def train_cifar10(args):
     print(f"JAX devices: {jax.devices()}")
 
     Path(args.save_dir).mkdir(parents=True, exist_ok=True)
+    run_name = "_".join([args.exp_name, args.tag])
     ch_mult = tuple(map(int, args.ch_mult.split(',')))
     key = jax.random.key(args.seed)
 
@@ -258,26 +263,26 @@ def train_cifar10(args):
             print(f"Loaded FID stats from {stats_path}")
         else:
             print("Computing FID statistics for real CIFAR-10 data...")
-            # Collect a subset of real images for FID stats
+
             real_images_list = []
             for imgs_batch, _ in dataloader:
-                # Convert BCHW to BHWC
-                # imgs_batch = np.transpose(imgs_batch, (0, 2, 3, 1))
                 real_images_list.append(imgs_batch)
                 if len(real_images_list) * args.batch_size >= 10000:  # Use 10k images for stats
                     break
             real_images = np.concatenate(real_images_list, axis=0)[:10000]
             real_images_uint8 = (real_images * 255).astype(np.uint8)
+
             mu_real, sigma_real = compute_statistics(
                 real_images_uint8, inception_params, apply_fn, batch_size=256, img_size=(256, 256)
             )
+
             np.savez(stats_path, mu=mu_real, sigma=sigma_real)
             print(f"Saved FID stats to {stats_path}")
     else:
         print("Skipping FID initialization (--no_fid flag set)")
         mu_real = sigma_real = inception_params = apply_fn = None
 
-    logf = open(f"{args.exp_name}_log.txt", "a" if args.resume else "w")
+    logf = open(f"{run_name}_log.txt", "a" if args.resume else "w")
     if not args.resume:
         if args.no_fid:
             logf.write("Epoch,Train_Loss,Recon_Loss,Commit_Loss\n")
@@ -289,7 +294,7 @@ def train_cifar10(args):
         return train_step(model, batch, opt_state, optimizer.update, key)
 
     if start_epoch == 0:
-        vis_path = os.path.join(args.save_dir, f"{args.exp_name}_reconstructions")
+        vis_path = os.path.join(args.save_dir, f"{run_name}_reconstructions")
         save_reconstruction_grid(vqvae, test_batch, 0, vis_path, n_images=25)
         print(f"Saved initial reconstruction grid to {vis_path}_epoch_0.png")
 
@@ -320,12 +325,8 @@ def train_cifar10(args):
 
 
     # aim logging
-    run = aim.Run(experiment=args.exp_name)
+    run = aim.Run(run_hash=run_name, repo=args.aim_repo, experiment=args.exp_name)
     run["hparams"] = vars(args)
-    #metric_loss = Metric(run=run, name="loss", context={"epoch": 0})
-    #metric_recon = Metric(run=run, name="recon", context={"epoch": 0})
-    #metric_commit = Metric(run=run, name="commit", context={"epoch": 0})
-
 
     # train loop
     for epoch in range(start_epoch, args.epochs):
@@ -407,20 +408,20 @@ def train_cifar10(args):
         logf.flush()
 
         if (epoch + 1) % args.save_interval == 0:
-            checkpoint_path = os.path.join(args.save_dir, f"{args.exp_name}_epoch_{epoch+1}")
+            checkpoint_path = os.path.join(args.save_dir, f"{run_name}_epoch_{epoch+1}")
             save_checkpoint(vqvae, opt_state, epoch + 1, args, checkpoint_path)
             print(f"Saved checkpoint to {checkpoint_path}")
 
         if (epoch + 1) % args.vis_interval == 0:
-            vis_path = os.path.join(args.save_dir, f"{args.exp_name}_reconstructions")
+            vis_path = os.path.join(args.save_dir, f"{run_name}_reconstructions")
             save_reconstruction_grid(vqvae, test_batch, epoch + 1, vis_path, n_images=25)
             print(f"Saved reconstruction grid to {vis_path}_epoch_{epoch+1}.png")
 
-    final_path = os.path.join(args.save_dir, f"{args.exp_name}_final")
+    final_path = os.path.join(args.save_dir, f"{run_name}_final")
     save_checkpoint(vqvae, opt_state, args.epochs, args, final_path)
     print(f"Training complete! Final model saved to {final_path}")
 
-    vis_path = os.path.join(args.save_dir, f"{args.exp_name}_reconstructions")
+    vis_path = os.path.join(args.save_dir, f"{run_name}_reconstructions")
     save_reconstruction_grid(vqvae, test_batch, args.epochs, vis_path, n_images=25)
     print(f"Saved final reconstruction grid to {vis_path}_epoch_{args.epochs}.png")
 
