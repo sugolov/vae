@@ -10,7 +10,7 @@
 #SBATCH --gres=gpu:a100:1
 #SBATCH --nodelist=lambda-hyperplane
 
-export EXPERIMENT_TAG=vqvae_cifar10_${SLURM_JOB_ID}
+export EXPERIMENT_NAME=vqvae_cifar10
 export DATA_NAME=CIFAR10
 
 # ==============================================================================
@@ -44,7 +44,8 @@ which -a python python3
 
 cd vae/train
 python train_vqvae.py \
-    --exp_name $EXPERIMENT_TAG \
+    --exp_name $EXPERIMENT_NAME \
+    --tag $SLURM_JOB_ID \
     --data_name $DATA_NAME \
     --epochs 1 \
     --batch_size 256 \

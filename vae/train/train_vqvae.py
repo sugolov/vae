@@ -11,6 +11,7 @@ import functools
 from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+from datetime import datetime
 import pickle
 import requests
 import tarfile
@@ -188,7 +189,13 @@ def train_cifar10(args):
     print(f"JAX devices: {jax.devices()}")
 
     Path(args.save_dir).mkdir(parents=True, exist_ok=True)
-    run_name = "_".join([args.exp_name, args.tag])
+
+    if args.tag is None:
+        tag = tag = datetime.now().strftime("%Y%m%d_%H%M%S")
+    else:
+        tag = args.tag
+    run_name = "_".join([args.exp_name, tag])
+
     ch_mult = tuple(map(int, args.ch_mult.split(',')))
     key = jax.random.key(args.seed)
 
@@ -282,7 +289,7 @@ def train_cifar10(args):
         print("Skipping FID initialization (--no_fid flag set)")
         mu_real = sigma_real = inception_params = apply_fn = None
 
-    logf = open(f"{run_name}_log.txt", "a" if args.resume else "w")
+    logf = open(f"{args.save_dir}/{run_name}_log.txt", "a" if args.resume else "w")
     if not args.resume:
         if args.no_fid:
             logf.write("Epoch,Train_Loss,Recon_Loss,Commit_Loss\n")
@@ -325,7 +332,7 @@ def train_cifar10(args):
 
 
     # aim logging
-    run = aim.Run(run_hash=run_name, repo=args.aim_repo, experiment=args.exp_name)
+    run = aim.Run(repo=args.aim_repo, experiment=args.exp_name)
     run["hparams"] = vars(args)
 
     # train loop
