@@ -7,10 +7,11 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --time=10:00:00
 #SBATCH --mem=24G
-#SBATCH --gres=gpu:5090:1
-#SBATCH --nodelist=tinybox
+#SBATCH --gres=gpu:a100:1
+#SBATCH --nodelist=lambda-hyperplane
 
-export EXPERIMENT_TAG=vqvae_cifar10_${SLURM_JOB_ID}
+export EXPERIMENT_NAME=vqvae_cifar10
+export DATA_NAME=CIFAR10
 
 # ==============================================================================
 # Keys + Directories
@@ -18,6 +19,7 @@ export EXPERIMENT_TAG=vqvae_cifar10_${SLURM_JOB_ID}
 
 export WANDB_API_KEY=53b82424aa495d0f59c8002f14b238bde52b09ed
 export TORCH_HOME=/mnt/data0/shared/anton/cache/torch
+export AIM_REPO=/mnt/data0/shared/anton/cache/aim
 export MPLCONFIGDIR=/mnt/data0/shared/anton/cache/.matplotlib
 
 # self output dirs
@@ -42,8 +44,10 @@ which -a python python3
 
 cd vae/train
 python train_vqvae.py \
-    --exp_name $EXPERIMENT_TAG \
-    --epochs 1000 \
+    --exp_name $EXPERIMENT_NAME \
+    --tag $SLURM_JOB_ID \
+    --data_name $DATA_NAME \
+    --epochs 1 \
     --batch_size 256 \
     --lr 1e-3 \
     --log_interval 5 \
@@ -51,7 +55,8 @@ python train_vqvae.py \
     --vis_interval 10 \
     --n_fid_samples 1000 \
     --save_dir $OUTPUT_DIR \
-    --data_dir $DATA_DIR \
+    --data_dir $DATA_DIR/$DATA_NAME \
+    --aim_repo $AIM_REPO \
     --ch 128 \
     --ch_mult "1,2,4" \
     --num_res_blocks 2 \
@@ -59,6 +64,6 @@ python train_vqvae.py \
     --embedding_dim 256 \
     --beta_commit 1.0 \
     --seed 42
-    --resume "/mnt/data0/shared/anton/cache/vqvae_checkpoints/vqvae_cifar10_205880_epoch_900_model.eqx"
+    #--resume "/mnt/data0/shared/anton/cache/vqvae_checkpoints/vqvae_cifar10_205880_epoch_900_model.eqx"
 
 deactivate
