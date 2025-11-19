@@ -179,7 +179,7 @@ def parse_args():
     p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
 
-def train_cifar10(args):
+def train(args):
     print(f"JAX backend: {jax.devices()[0].platform}")
     print(f"JAX devices: {jax.devices()}")
 
@@ -428,4 +428,4 @@ def train_cifar10(args):
 
 if __name__ == "__main__":
     args = parse_args()
-    train_cifar10(args)
+    train(args)
