@@ -367,7 +367,9 @@ class VQVAE(eqx.Module):
         recon_loss = jnp.mean((x - x_recon) ** 2)
         vq_loss = jnp.mean((jax.lax.stop_gradient(z_e) - z_q) ** 2)
         commit_loss = self.beta_commit * jnp.mean((z_e - jax.lax.stop_gradient(z_q)) ** 2)
-
+        #TODO: add contrastive loss across z_e here !
+        # contrastive_loss = 
+        
         return {
             "reconstruction": x_recon,
             "z_e": z_e,
