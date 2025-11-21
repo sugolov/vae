@@ -384,7 +384,7 @@ def train(args):
             print(f"\nEpoch {epoch+1}: Computing FID score...")
             # Collect sample images for FID
             sample_images = []
-            for imgs_batch, _ in dataloader:
+            for imgs_batch, _, _ in dataloader:
                 # Convert BCHW to BHWC
                 # imgs_batch = np.transpose(imgs_batch, (0, 2, 3, 1))
                 sample_images.append(imgs_batch)
