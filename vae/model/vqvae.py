@@ -3,6 +3,10 @@ import jax
 from jax import numpy as jnp
 from jaxtyping import Float, Array, Int
 
+def norm(x): return jnp.sqrt(jnp.sum((x)**2))
+def sqdist(x1, x2): return jnp.sum((x1 - x2)**2)
+def cossim(x1, x2): return jnp.sum(x1 * x2) / (norm(x1) * norm(x2))
+
 def squared_euclidean_distance(
     a: Float[Array, "N D"],
     b: Float[Array, "K D"]
@@ -12,6 +16,14 @@ def squared_euclidean_distance(
     b_sq = jnp.sum(b * b, axis=1, keepdims=True).T
     ab = a @ b.T
     return a_sq - 2 * ab + b_sq
+
+def mat_cossim(x):
+    """
+    - x is D x N
+    - return N x N of cos sims vecs
+    """
+    x = x / jnp.linalg.norm(x, axis=1, keepdims=True)
+    return x @ x.T
 
 
 def flatten_spatial(x: Float[Array, "H W D"]) -> Float[Array, "HW D"]:
@@ -27,6 +39,29 @@ def unflatten_spatial(
     D = x.shape[-1]
     return x.reshape(H, W, D)
 
+def simclr_batch_cat(x_i, x_j, flatten=True):
+    """concatenate so 2k-1, 2k are positive pairs for 1 <= k <= batch_size"""
+    x = jnp.stack([x_i, x_j]).transpose((1, 0, 2, 3, 4))
+    if flatten:
+        x = x.reshape(x.shape[0] * x.shape[1], -1)
+    else:
+        x = x.reshape(x.shape[0] * x.shape[1], *x.shape[2:])
+    return x
+
+
+def simclr_loss(x_i, x_j):
+    x = simclr_batch_cat(x_i, x_j, flatten=True) # reshape to 2k-1, 2k form
+    return simclr_loss_batched(x)
+
+def simclr_loss_batched(x):
+    """assumes positive pairs are consecutive in the batch"""
+    x = x.reshape(x.shape[0], -1)
+    sims = mat_cossim(x)
+    sims = sims.at[jnp.diag_indices(len(sims))].set(-jnp.inf)
+    sims = -jax.nn.log_softmax(sims, axis=0)
+
+    loss1, loss2 = jnp.diag(sims, -1)[::2], jnp.diag(sims, 1)[::2]
+    return jnp.stack([loss1, loss2], axis=1).flatten()
 
 class ResBlock(eqx.Module):
     norm_fn1: eqx.nn.GroupNorm
@@ -369,7 +404,7 @@ class VQVAE(eqx.Module):
         commit_loss = self.beta_commit * jnp.mean((z_e - jax.lax.stop_gradient(z_q)) ** 2)
         #TODO: add contrastive loss across z_e here !
         # contrastive_loss = 
-        
+
         return {
             "reconstruction": x_recon,
             "z_e": z_e,
@@ -398,6 +433,52 @@ def train_step(vqvae, data, opt_state, opt_update, key):
         return losses, outputs
 
     (loss, outputs), grads = jax.value_and_grad(loss_fn, has_aux=True)(vqvae, data)
+
+    grads = eqx.tree_at(
+        lambda g: g.quantizer.codebook,
+        grads,
+        jnp.zeros_like(vqvae.quantizer.codebook)
+    )
+
+    updates, opt_state = opt_update(grads, opt_state)
+    vqvae = eqx.apply_updates(vqvae, updates)
+
+    batch_cluster_size, batch_embedding_sum = jax.vmap(
+        lambda out: vqvae.quantizer.compute_ema_statistics(out["z_e"], out["indices"])
+    )(outputs)
+
+    batch_cluster_size = jnp.sum(batch_cluster_size, axis=0)
+    batch_embedding_sum = jnp.sum(batch_embedding_sum, axis=0)
+
+    all_z_e = outputs["z_e"].reshape(-1, outputs["z_e"].shape[-1])
+
+    new_quantizer = vqvae.quantizer.update_codebook_ema(
+        batch_cluster_size, batch_embedding_sum, all_z_e, key
+    )
+    vqvae = eqx.tree_at(lambda m: m.quantizer, vqvae, new_quantizer)
+
+    return vqvae, opt_state, loss, outputs
+
+
+def vqvae_simclr_embed_loss(vqvae, data1, data2):
+    # flatten to make a big forward batch
+    data = simclr_batch_cat(data1, data2, flatten=False)
+    losses, outputs = eqx.filter_vmap(_single_vqvae_loss, in_axes=(None, 0))(vqvae, data)
+    
+    # contrastive loss on z_e embeds
+    ctr_loss = simclr_loss_batched(outputs["z_e"].reshape(outputs["z_e"].shape[0], -1))
+
+    loss = jnp.mean(losses) + jnp.mean(ctr_loss)
+    outputs["ctr_embed_loss"] = ctr_loss
+
+    return loss, outputs
+
+def train_simclr_step(vqvae, data1, data2, opt_state, opt_update, key):
+    def loss_fn(model, x1, x2):
+        losses, outputs = vqvae_simclr_embed_loss(model, x1, x2)
+        return losses, outputs
+
+    (loss, outputs), grads = jax.value_and_grad(loss_fn, has_aux=True)(vqvae, data1, data2)
 
     grads = eqx.tree_at(
         lambda g: g.quantizer.codebook,

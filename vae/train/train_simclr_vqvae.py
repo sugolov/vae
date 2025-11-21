@@ -18,7 +18,7 @@ import tarfile
 from typing import Tuple
 
 from vae.data import build_dataset
-from vae.model.vqvae import VQVAE, train_step
+from vae.model.vqvae import VQVAE, train_step, train_simclr_step
 from vae.train.fid import compute_frechet_distance, compute_statistics
 
 from vae.train.flax_inception import InceptionV3
@@ -207,13 +207,14 @@ def train(args):
         batch_size=args.batch_size,
         is_train=True,
         num_workers=4,
+        simclr=True
     )
 
     n_batches = n_train // args.batch_size
     print(f"Loaded {n_train} training images")
     
     # Store first batch for visualization/testing - convert to HWC
-    first_batch_imgs, _ = next(iter(dataloader))
+    first_batch_imgs, _, _ = next(iter(dataloader))
     test_batch = first_batch_imgs[:100]  # Keep 100 images for visualization
     # test_batch = np.transpose(test_batch, (0, 2, 3, 1))  # BCHW -> BHWC
     print(f"Test batch shape: {test_batch.shape}")
@@ -297,8 +298,8 @@ def train(args):
             logf.write("Epoch,Train_Loss,Recon_Loss,Commit_Loss,FID\n")
 
     @eqx.filter_jit
-    def jit_train_step(model, batch, opt_state, key):
-        return train_step(model, batch, opt_state, optimizer.update, key)
+    def jit_train_step(model, batch1, batch2, opt_state, key):
+        return train_simclr_step(model, batch1, batch2, opt_state, optimizer.update, key)
 
     if start_epoch == 0:
         vis_path = os.path.join(args.save_dir, f"{run_name}_reconstructions")
@@ -337,28 +338,32 @@ def train(args):
 
     # train loop
     for epoch in range(start_epoch, args.epochs):
-        epoch_losses = {"total": 0, "recon": 0, "commit": 0}
+        epoch_losses = {"total": 0, "recon": 0, "commit": 0, "ctr_loss": 0}
 
         pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{args.epochs}")
         
-        for imgs_batch, labels_batch in pbar:
-            imgs_jax = jnp.array(imgs_batch)
+        for batch1, batch2, labels_batch in pbar:
+            batch1 = jnp.array(batch1)
+            batch2 = jnp.array(batch2)
 
             key, subkey = jax.random.split(key)
-            vqvae, opt_state, loss, outputs = jit_train_step(vqvae, imgs_jax, opt_state, subkey)
+            vqvae, opt_state, loss, outputs = jit_train_step(vqvae, batch1, batch2, opt_state, subkey)
 
-            batch_size_actual = imgs_jax.shape[0]
+            batch_size_actual = batch1.shape[0]
             recon_losses = outputs["recon_loss"]
             commit_losses = outputs["commit_loss"]
+            ctr_losses = outputs["ctr_embed_loss"]
 
-            epoch_losses["total"] += float(loss) * batch_size_actual
+            epoch_losses["total"] += float(loss) * batch_size_actual * 2
             epoch_losses["recon"] += float(jnp.sum(recon_losses))
             epoch_losses["commit"] += float(jnp.sum(commit_losses))
+            epoch_losses["ctr_loss"] += float(jnp.sum(ctr_losses))
 
             pbar.set_postfix({
                 "loss": f"{loss:.4f}",
                 "recon": f"{jnp.mean(recon_losses):.6f}",
-                "commit": f"{jnp.mean(commit_losses):.8f}"
+                "commit": f"{jnp.mean(commit_losses):.8f}",
+                "ctr_loss": f"{jnp.mean(ctr_losses):.8f}"
             })
 
             # Collect z_e into a host-side buffer
