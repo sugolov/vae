@@ -273,7 +273,7 @@ def train(args):
             print("Computing FID statistics for real CIFAR-10 data...")
 
             real_images_list = []
-            for imgs_batch, _ in dataloader:
+            for imgs_batch, _, _ in dataloader:
                 real_images_list.append(imgs_batch)
                 if len(real_images_list) * args.batch_size >= 10000:  # Use 10k images for stats
                     break
@@ -310,7 +310,7 @@ def train(args):
             print("Computing initial FID score...")
             # For FID, collect sample images
             sample_images = []
-            for imgs_batch, _ in dataloader:
+            for imgs_batch, _, _ in dataloader:
                 # Convert BCHW to BHWC
                 # imgs_batch = np.transpose(imgs_batch, (0, 2, 3, 1))
                 sample_images.append(imgs_batch)
