@@ -11,6 +11,7 @@
 #SBATCH --nodelist=lambda-hyperplane
 
 export EXPERIMENT_NAME=vqvae_cifar10
+export EXPERIMENT_TAG=$EXPERIMENT_NAME_$SLURM_JOB_ID
 export DATA_NAME=CIFAR10
 
 # ==============================================================================
@@ -47,7 +48,7 @@ python train_vqvae.py \
     --exp_name $EXPERIMENT_NAME \
     --tag $SLURM_JOB_ID \
     --data_name $DATA_NAME \
-    --epochs 1 \
+    --epochs 750 \
     --batch_size 256 \
     --lr 1e-3 \
     --log_interval 5 \
