@@ -375,7 +375,7 @@ def train(args):
         # track with aim
         _ = [run.track(v, name=k, epoch=epoch) for k, v in avg_losses.items()]
 
-        energy = compute_code_energy(model, real_images[:256])
+        energy = compute_code_energy(vqvae, real_images[:256])
 
         run.track(jnp.mean(energy), name='avg_code_energy', epoch=epoch)
         run.track(aim.Distribution(energy), name='code_energies', epoch=epoch)
