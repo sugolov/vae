@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=vqvae
+#SBATCH --job-name=simclr_VQVAE
 #SBATCH --ntasks=1
 #SBATCH --output=vae/slurm/output/%j
 #SBATCH --error=vae/slurm/error/%j

@@ -354,7 +354,7 @@ def train(args):
             commit_losses = outputs["commit_loss"]
             ctr_losses = outputs["ctr_embed_loss"]
 
-            epoch_losses["total"] += float(loss) * batch_size_actual * 2
+            epoch_losses["total"] += float(loss) * batch_size_actual
             epoch_losses["recon"] += float(jnp.sum(recon_losses))
             epoch_losses["commit"] += float(jnp.sum(commit_losses))
             epoch_losses["ctr_loss"] += float(jnp.sum(ctr_losses))
