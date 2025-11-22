@@ -1,11 +1,16 @@
 .venv
 *.egg-info
 vae/*/__pycache__
-*/__pycache__
+*/__pycache__/*
 slurm
 vae/train/data/*
 vae/test/data/*
+vae/notebooks/data/*
 vae/train/checkpoints/*
+vae/train/cifar-10-batches-py
+
 
 *_log.txt
 *.aim
+*.pyv
+*.tar.gz
