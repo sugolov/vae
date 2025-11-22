@@ -372,7 +372,7 @@ def train(args):
 
         avg_losses = {k: v / n_train for k, v in epoch_losses.items()}
         # track with aim
-        _ = [run.track(v, name=k) for k, v in avg_losses.items()]
+        _ = [run.track(v, name=k, epoch=epoch) for k, v in avg_losses.items()]
 
         # Compute FID only at log intervals and if not disabled
         if (epoch + 1) % args.log_interval == 0 and not args.no_fid:
@@ -388,6 +388,7 @@ def train(args):
             sample_images = np.concatenate(sample_images, axis=0)[:args.n_fid_samples]
             
             fid_score = compute_fid_score(vqvae, sample_images, mu_real, sigma_real, inception_params, apply_fn, args.n_fid_samples, args.batch_size)
+            run.track(fid_score, name="fid", epoch=epoch)
 
             print(f"Epoch {epoch+1}: Loss={avg_losses['total']:.4f}, "
                   f"Recon={avg_losses['recon']:.6f}, Commit={avg_losses['commit']:.8f}, "
