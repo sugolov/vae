@@ -215,7 +215,7 @@ def train(args):
         is_train=True,
         num_workers=4,
     )
-
+    
     n_batches = n_train // args.batch_size
     print(f"Loaded {n_train} training images")
     
