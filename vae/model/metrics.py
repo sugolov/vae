@@ -5,6 +5,10 @@ import jax.numpy as jnp
 import equinox as eqx
 import equinox.nn as nn
 
+import optax 
+
+from functools import partial
+
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -56,5 +60,33 @@ def compute_code_energy(vqvae, batch):
 
     return code_energy(codes, enc)
 
+def meanshift_codes(key, codes, data, steps=200, lr=5e-2, beta=1.0, sigma = 0.1):
+    optim = optax.sgd(learning_rate=lr)
+    opt_state = optim.init(codes)
+    energy_vals = []
+
+    @partial(jax.jit, static_argnames=["kernel"])
+    def code_step(codes, opt_state, kernel=sq_kernel):
+        grad, energy = code_grad(codes, data, kernel=kernel, beta=beta)
+        updates, opt_state = optim.update(grad, opt_state, codes)
+        return updates, opt_state, jnp.mean(energy)
+    
+    for step in range(steps):
+        updates, opt_state, energy = code_step(codes, opt_state)
+        codes = optax.apply_updates(codes, updates)
+
+        # key, key_rand = jax.random.split(key)
+        # eps = jax.random.normal(key_rand, shape=codes.shape)
+
+        # codes = codes + sigma * eps
+
+        # codes_history.append(codes.copy())  # Add this line
+
+        energy_vals.append(energy)
+
+    return codes, energy_vals
+    
+key = jax.random.PRNGKey(0)
+codes, energy_vals = meanshift_codes(key, codes, data, s)
 
 
