@@ -19,7 +19,7 @@ from typing import Tuple
 
 from vae.data import build_dataset
 from vae.model.vqvae import VQVAE, train_step
-from vae.model.metrics import compute_code_energy
+from vae.model.metrics import compute_code_energy, meanshift_codes
 from vae.train.fid import compute_frechet_distance, compute_statistics
 
 from vae.train.flax_inception import InceptionV3
@@ -181,6 +181,12 @@ def parse_args():
     p.add_argument("--num_embeddings", type=int, default=1024)
     p.add_argument("--embedding_dim", type=int, default=256)
     p.add_argument("--beta_commit", type=float, default=1.0)
+
+    p.add_argument("--mean-shift", action="store_true")
+    p.add_argument("--ms-steps", type=int, default=50)
+    p.add_argument("--ms-lr", type=float, default=5e-3)
+    p.add_argument("--ms-beta", type=float, default=1.0)
+    p.add_argument("--ms-sigma", type=float, default=0.0)
 
     p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
@@ -371,14 +377,34 @@ def train(args):
             if z_buffer.shape[0] > buffer_max:
                 z_buffer = z_buffer[-buffer_max:]
 
+            # do mean shift a little after each step
+            if args.mean_shift:
+                key = jax.random.PRNGKey(0)
+                key, codes, energy_vals = meanshift_codes(
+                    key, 
+                    codes=vqvae.quantizer.codebook, 
+                    data=z_batch,
+                    steps=args.ms_steps,
+                    lr=args.ms_lr,
+                    beta=args.ms_beta,
+                    sigma=args.ms_sigma
+                )
+                # assign new codes
+                eqx.tree_at(lambda m: m.quantizer.codebook, vqvae, codes)
+
+                run.track(energy_vals, name='ms_energy', epoch=epoch, step=args.ms_steps)
+
+
+
+
         avg_losses = {k: v / n_train for k, v in epoch_losses.items()}
         # track with aim
         _ = [run.track(v, name=k, epoch=epoch) for k, v in avg_losses.items()]
 
         energy = compute_code_energy(vqvae, real_images[:256])
-
-        run.track(jnp.mean(energy), name='avg_code_energy', epoch=epoch)
-        run.track(aim.Distribution(energy), name='code_energies', epoch=epoch)
+        
+        run.track(float(jnp.mean(energy)), name='avg_code_energy', epoch=epoch)
+        run.track(aim.Distribution(np.array(energy)), name='code_energies', epoch=epoch)
 
         # Compute FID only at log intervals and if not disabled
         if (epoch + 1) % args.log_interval == 0 and not args.no_fid:

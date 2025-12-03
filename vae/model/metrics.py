@@ -82,8 +82,8 @@ def meanshift_codes(key, codes, data, steps=200, lr=5e-2, beta=1.0, sigma = 0.1)
 
         # codes_history.append(codes.copy())  # Add this line
 
-        energy_vals.append(energy)
+        energy_vals.append(energy.item())
 
-    return codes, energy_vals
+    return key, codes, energy_vals
 
 
