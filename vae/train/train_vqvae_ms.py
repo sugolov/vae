@@ -210,6 +210,16 @@ def train(args):
         num_workers=4,
     )
 
+
+    dataloader_test, _, _, _ = build_dataset(
+        args.data_name,
+        args.data_dir,
+        batch_size=args.batch_size,
+        is_train=False,
+        num_workers=4,
+    )
+
+
     n_batches = n_train // args.batch_size
     print(f"Loaded {n_train} training images")
     
@@ -372,11 +382,10 @@ def train(args):
                 z_buffer = z_buffer[-buffer_max:]
 
         avg_losses = {k: v / n_train for k, v in epoch_losses.items()}
-        # track with aim
-        _ = [run.track(v, name=k, epoch=epoch) for k, v in avg_losses.items()]
 
         energy = compute_code_energy(vqvae, real_images[:256])
-
+        # track with aim
+        _ = [run.track(v, name=k, epoch=epoch) for k, v in avg_losses.items()]
         run.track(jnp.mean(energy), name='avg_code_energy', epoch=epoch)
         run.track(aim.Distribution(energy), name='code_energies', epoch=epoch)
 

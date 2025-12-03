@@ -12,8 +12,11 @@ from functools import partial
 import numpy as np
 import matplotlib.pyplot as plt
 
+from tqdm import tqdm
+
 from vae.model.vqvae import VQVAE
 
+def entropy(dist): return sum(jax.scipy.special.entr(dist))
 def norm(x): return jnp.sqrt(jnp.sum((x)**2))
 def sqdist(x1, x2): return jnp.sum((x1 - x2)**2)
 def cossim(x1, x2): return jnp.sum(x1 * x2) / (norm(x1) * norm(x2))
@@ -82,8 +85,27 @@ def meanshift_codes(key, codes, data, steps=200, lr=5e-2, beta=1.0, sigma = 0.1)
 
         # codes_history.append(codes.copy())  # Add this line
 
-        energy_vals.append(energy)
+        energy_vals.append(energy.float())
 
     return codes, energy_vals
 
+def compute_code_usage(vqvae, dataloader):
 
+    num = vqvae.quantizer.num_embeddings
+    track = jnp.zeros(num)
+    zero_vec = jnp.zeros(num)
+
+    @jax.jit
+    def encode_batch(x):
+        return jax.vmap(vqvae.encode)(x)
+
+    for imgs_batch, _ in tqdm(dataloader, desc="measuring code on test"):
+        imgs_jax = jnp.array(imgs_batch)
+        idx = encode_batch(imgs_jax)
+        # track number of times codes appear
+        track += zero_vec.at[idx.flatten()].set(1.0)
+
+    prop = jnp.sum(track != 0) / len(track)
+    ent = entropy(track / sum(track)) # entropy of normalized hist among non-zero
+
+    return prop, ent
