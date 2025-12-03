@@ -85,8 +85,5 @@ def meanshift_codes(key, codes, data, steps=200, lr=5e-2, beta=1.0, sigma = 0.1)
         energy_vals.append(energy)
 
     return codes, energy_vals
-    
-key = jax.random.PRNGKey(0)
-codes, energy_vals = meanshift_codes(key, codes, data, s)
 
 
