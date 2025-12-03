@@ -10,7 +10,7 @@
 #SBATCH --gres=gpu:a100:1
 #SBATCH --nodelist=lambda-hyperplane
 
-export EXPERIMENT_NAME=vqvae_cifar10_ms_baseline
+export EXPERIMENT_NAME=vqvae_cifar10_ms_lr${MS_LR}
 export EXPERIMENT_TAG=${EXPERIMENT_NAME}_${SLURM_JOB_ID}
 export DATA_NAME=CIFAR10
 
@@ -25,7 +25,7 @@ export MPLCONFIGDIR=/mnt/data0/shared/anton/cache/.matplotlib
 
 # self output dirs
 export DATA_DIR=/mnt/data0/shared/anton/cache/data
-export OUTPUT_DIR=/mnt/data0/shared/anton/cache/vqvae_checkpoints/$EXPERIMENT_TAG
+export OUTPUT_DIR=/mnt/data0/shared/anton/cache/vqvae_checkpoints/ms_lr_sweep/$EXPERIMENT_TAG
 
 # Fix JAX CUDA
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
@@ -64,11 +64,11 @@ python train_vqvae_ms.py \
     --num_res_blocks 2 \
     --num_embeddings 1024 \
     --embedding_dim 256 \
-    --beta_commit 1.0 
-    #--mean-shift \
-    #--ms-steps 100 \
-    #--ms-lr 5e-3 \
-    #--ms-beta 1.0 
+    --beta_commit 1.0 \
+    --mean-shift \
+    --ms-steps 50 \
+    --ms-lr ${MS_LR:-5e-3} \
+    --ms-beta 1.0 
     #--resume "/mnt/data0/shared/anton/cache/vqvae_checkpoints/vqvae_cifar10_205880_epoch_900_model.eqx"
 
 deactivate
