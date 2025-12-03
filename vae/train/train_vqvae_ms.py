@@ -19,7 +19,7 @@ from typing import Tuple
 
 from vae.data import build_dataset
 from vae.model.vqvae import VQVAE, train_step
-from vae.model.metrics import compute_code_energy, meanshift_codes
+from vae.model.metrics import meanshift_codes, compute_code_energy, compute_code_usage
 from vae.train.fid import compute_frechet_distance, compute_statistics
 
 from vae.train.flax_inception import InceptionV3
@@ -407,6 +407,7 @@ def train(args):
 
 
 
+
         avg_losses = {k: v / n_train for k, v in epoch_losses.items()}
 
         energy = compute_code_energy(vqvae, real_images[:256])
@@ -414,8 +415,13 @@ def train(args):
         _ = [run.track(v, name=k, epoch=epoch) for k, v in avg_losses.items()]
 
         energy = compute_code_energy(vqvae, real_images[:256])
-        
+        prop, ent = compute_code_usage(vqvae, dataloader_test)
+
+
         run.track(float(jnp.mean(energy)), name='avg_code_energy', epoch=epoch)
+        run.track(prop.item(), name='code_use_prop', epoch=epoch)
+        run.track(ent.item(), name='code_use_ent', epoch=epoch)
+
         run.track(aim.Distribution(np.array(energy)), name='code_energies', epoch=epoch)
 
         # Compute FID only at log intervals and if not disabled
